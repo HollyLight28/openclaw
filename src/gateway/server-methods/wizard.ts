@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { GatewayRequestContext, GatewayRequestHandlers, RespondFn } from "./types.js";
 import { defaultRuntime } from "../../runtime.js";
+import { readStringValue } from "../../shared/string-coerce.js";
 import { WizardSession } from "../../wizard/session.js";
 import {
   ErrorCodes,
@@ -11,6 +11,7 @@ import {
   validateWizardStatusParams,
 } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
+import type { GatewayRequestContext, GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams } from "./validation.js";
 
 function readWizardStatus(session: WizardSession) {
@@ -46,7 +47,7 @@ export const wizardHandlers: GatewayRequestHandlers = {
     const sessionId = randomUUID();
     const opts = {
       mode: params.mode,
-      workspace: typeof params.workspace === "string" ? params.workspace : undefined,
+      workspace: readStringValue(params.workspace),
     };
     const session = new WizardSession((prompter) =>
       context.wizardRunner(opts, defaultRuntime, prompter),

@@ -19,8 +19,8 @@ const NON_INTERACTIVE_DEFAULT_OPTIONS = {
 export function createThrowingRuntime(): NonInteractiveRuntime {
   return {
     log: () => {},
-    error: (msg: string) => {
-      throw new Error(msg);
+    error: (...args: unknown[]) => {
+      throw new Error(args.map(String).join(" "));
     },
     exit: (code: number) => {
       throw new Error(`exit:${code}`);
@@ -28,19 +28,19 @@ export function createThrowingRuntime(): NonInteractiveRuntime {
   };
 }
 
-export async function runNonInteractiveOnboarding(
+export async function runNonInteractiveSetup(
   options: Record<string, unknown>,
   runtime: NonInteractiveRuntime,
 ): Promise<void> {
-  const { runNonInteractiveOnboarding: run } = await import("./onboard-non-interactive.js");
+  const { runNonInteractiveSetup: run } = await import("./onboard-non-interactive.js");
   await run(options, runtime);
 }
 
-export async function runNonInteractiveOnboardingWithDefaults(
+export async function runNonInteractiveSetupWithDefaults(
   runtime: NonInteractiveRuntime,
   options: Record<string, unknown>,
 ): Promise<void> {
-  await runNonInteractiveOnboarding(
+  await runNonInteractiveSetup(
     {
       ...NON_INTERACTIVE_DEFAULT_OPTIONS,
       ...options,

@@ -1,6 +1,8 @@
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isPidAlive } from "../shared/pid-alive.js";
+import { resolveProcessScopedMap } from "../shared/process-scoped-map.js";
 
 export type FileLockOptions = {
   retries: {
@@ -25,18 +27,43 @@ type HeldLock = {
 };
 
 const HELD_LOCKS_KEY = Symbol.for("openclaw.fileLockHeldLocks");
+const HELD_LOCKS = resolveProcessScopedMap<HeldLock>(HELD_LOCKS_KEY);
+const CLEANUP_REGISTERED_KEY = Symbol.for("openclaw.fileLockCleanupRegistered");
 
-function resolveHeldLocks(): Map<string, HeldLock> {
-  const proc = process as NodeJS.Process & {
-    [HELD_LOCKS_KEY]?: Map<string, HeldLock>;
-  };
-  if (!proc[HELD_LOCKS_KEY]) {
-    proc[HELD_LOCKS_KEY] = new Map<string, HeldLock>();
+function releaseAllLocksSync(): void {
+  for (const [normalizedFile, held] of HELD_LOCKS) {
+    // Kick off best-effort async closes before dropping references so tests
+    // don't leave FileHandle objects for GC to close later.
+    void held.handle.close().catch(() => undefined);
+    rmLockPathSync(held.lockPath);
+    HELD_LOCKS.delete(normalizedFile);
   }
-  return proc[HELD_LOCKS_KEY];
 }
 
-const HELD_LOCKS = resolveHeldLocks();
+async function drainAllLocks(): Promise<void> {
+  for (const [normalizedFile, held] of Array.from(HELD_LOCKS.entries())) {
+    HELD_LOCKS.delete(normalizedFile);
+    await held.handle.close().catch(() => undefined);
+    await fs.rm(held.lockPath, { force: true }).catch(() => undefined);
+  }
+}
+
+function rmLockPathSync(lockPath: string): void {
+  try {
+    fsSync.rmSync(lockPath, { force: true });
+  } catch {
+    // Best-effort exit cleanup only.
+  }
+}
+
+function ensureExitCleanupRegistered(): void {
+  const proc = process as NodeJS.Process & { [CLEANUP_REGISTERED_KEY]?: boolean };
+  if (proc[CLEANUP_REGISTERED_KEY]) {
+    return;
+  }
+  proc[CLEANUP_REGISTERED_KEY] = true;
+  process.on("exit", releaseAllLocksSync);
+}
 
 function computeDelayMs(retries: FileLockOptions["retries"], attempt: number): number {
   const base = Math.min(
@@ -110,10 +137,20 @@ async function releaseHeldLock(normalizedFile: string): Promise<void> {
   await fs.rm(current.lockPath, { force: true }).catch(() => undefined);
 }
 
+export function resetFileLockStateForTest(): void {
+  releaseAllLocksSync();
+}
+
+export async function drainFileLockStateForTest(): Promise<void> {
+  await drainAllLocks();
+}
+
+/** Acquire a re-entrant process-local file lock backed by a `.lock` sidecar file. */
 export async function acquireFileLock(
   filePath: string,
   options: FileLockOptions,
 ): Promise<FileLockHandle> {
+  ensureExitCleanupRegistered();
   const normalizedFile = await resolveNormalizedFilePath(filePath);
   const lockPath = `${normalizedFile}.lock`;
   const held = HELD_LOCKS.get(normalizedFile);
@@ -157,6 +194,7 @@ export async function acquireFileLock(
   throw new Error(`file lock timeout for ${normalizedFile}`);
 }
 
+/** Run an async callback while holding a file lock, always releasing the lock afterward. */
 export async function withFileLock<T>(
   filePath: string,
   options: FileLockOptions,

@@ -1,4 +1,3 @@
-import type { MSTeamsAttachmentLike, MSTeamsHtmlAttachmentSummary } from "./types.js";
 import {
   ATTACHMENT_TAG_RE,
   extractHtmlFromAttachment,
@@ -7,6 +6,7 @@ import {
   isLikelyImageAttachment,
   safeHostForUrl,
 } from "./shared.js";
+import type { MSTeamsAttachmentLike, MSTeamsHtmlAttachmentSummary } from "./types.js";
 
 export function summarizeMSTeamsHtmlAttachments(
   attachments: MSTeamsAttachmentLike[] | undefined,
@@ -74,13 +74,14 @@ export function summarizeMSTeamsHtmlAttachments(
 
 export function buildMSTeamsAttachmentPlaceholder(
   attachments: MSTeamsAttachmentLike[] | undefined,
+  limits?: { maxInlineBytes?: number; maxInlineTotalBytes?: number },
 ): string {
   const list = Array.isArray(attachments) ? attachments : [];
   if (list.length === 0) {
     return "";
   }
   const imageCount = list.filter(isLikelyImageAttachment).length;
-  const inlineCount = extractInlineImageCandidates(list).length;
+  const inlineCount = extractInlineImageCandidates(list, limits).length;
   const totalImages = imageCount + inlineCount;
   if (totalImages > 0) {
     return `<media:image>${totalImages > 1 ? ` (${totalImages} images)` : ""}`;
